@@ -1,0 +1,26 @@
+name: qwen3.5-9b
+version: "1-int4-autoround"
+
+provider: Intel
+architecture: Qwen
+
+family: Qwen3.5-9B
+parameter_count: 9_000_000_000
+
+quantization: int4-autoround
+context_window: 32768
+
+description: >
+  INT4 AutoRound quantised version of Qwen3.5-9B optimised for efficient
+  inference using symmetric quantisation with group size 128.
+  bibtex citation: 
+  @article{cheng2023optimize,
+  title={Optimize weight rounding via signed gradient descent for the quantization of llms},
+  author={Cheng, Wenhua and Zhang, Weiwei and Shen, Haihao and Cai, Yiyang and He, Xin and Lv, Kaokao and Liu, Yi},
+  journal={arXiv preprint arXiv:2309.05516},
+  year={2023}}
+
+link: https://huggingface.co/Qwen/Qwen3.5-9B
+
+date_added: null
+sha256: null

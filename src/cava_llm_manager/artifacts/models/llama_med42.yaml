@@ -1,0 +1,21 @@
+name: llama3-med42-8b
+version: "1"
+
+provider: m42-health
+architecture: llama
+
+family: med42-v2
+parameter_count: 8_000_000_000
+quantization: Q5_K_M
+
+context_window: 8192
+
+description: >
+  Clinically aligned LLM from the Med42-v2 suite built on Llama 3 and tuned for
+  medical knowledge tasks including diagnosis support, patient summarisation
+  and clinical question answering.
+
+link: https://huggingface.co/mradermacher/Llama3-Med42-8B-GGUF/resolve/main/Llama3-Med42-8B.Q5_K_M.gguf
+
+date_added: null
+sha256: null

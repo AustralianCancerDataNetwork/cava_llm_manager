@@ -1,0 +1,20 @@
+name: medembed-small
+version: "0.1"
+
+provider: mrademacher
+architecture: bert
+
+family: MedEmbed-small-v0.1
+parameter_count: 33_200_000
+
+quantization: f16
+context_window: null
+
+description: >
+  Small clinical embedding model derived from BGE-small and adapted for
+  biomedical semantic similarity and retrieval tasks.
+
+link: https://huggingface.co/mradermacher/MedEmbed-small-v0.1-GGUF
+
+date_added: null
+sha256: null

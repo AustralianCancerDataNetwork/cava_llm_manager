@@ -1,0 +1,28 @@
+name: gemma-3-4b-it
+version: ""
+
+provider: ggml-org
+architecture: gemma3
+
+quantization: q4_k_m
+context_window: 128_000
+
+description: >
+  GGUF quantized instruct variant of Gemma 3 4B. Gemma 3 is a lightweight
+  multimodal open model family from Google, supporting text and image input
+  with text output.
+  bibtex
+  @article{gemma_2025,
+    title={Gemma 3},
+    url={https://goo.gle/Gemma3Report},
+    publisher={Kaggle},
+    author={Gemma Team},
+    year={2025}}
+
+link: https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF
+
+date_added: null
+sha256: null
+
+parameter_count: 4_000_000_000
+family: gemma-3
