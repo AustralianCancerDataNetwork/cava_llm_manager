@@ -1,0 +1,103 @@
+name: genomic_mutation_extraction
+version: v1
+
+description: >
+  Few-shot examples for extracting genomic mutation test results from oncology
+  reports. Each example contains a single report. Only genomic mutation markers
+  should be extracted.
+
+examples:
+
+  - input: |
+      EGFR exon 19 deletion.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: EGFR
+              test_result: positive
+              variant: exon 19 deletion
+
+
+  - input: |
+      No EGFR/BRAF/KRAS mutations and ALK/ROS1 IHC -ive.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: EGFR
+              test_result: negative
+              variant: null
+            - genomic_marker: BRAF
+              test_result: negative
+              variant: null
+            - genomic_marker: KRAS
+              test_result: negative
+              variant: null
+            - genomic_marker: ALK
+              test_result: negative
+              variant: null
+            - genomic_marker: ROS1
+              test_result: negative
+              variant: null
+
+
+  - input: |
+      Send off ALK, EGFR and ROS1.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: ALK
+              test_result: result_pending
+              variant: null
+            - genomic_marker: EGFR
+              test_result: result_pending
+              variant: null
+            - genomic_marker: ROS1
+              test_result: result_pending
+              variant: null
+
+
+  - input: |
+      BRAF V600E mutation detected.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: BRAF
+              test_result: positive
+              variant: V600E
+
+
+  - input: |
+      ALK rearrangement negative.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: ALK
+              test_result: negative
+              variant: null
+      
+  - input: |
+      EGFR mutation detected, ALK and ROS1 negative.
+
+    output:
+      reports:
+        - report_id: 1
+          tests:
+            - genomic_marker: EGFR
+              test_result: positive
+              variant: null
+            - genomic_marker: ALK
+              test_result: negative
+              variant: null
+            - genomic_marker: ROS1
+              test_result: negative
+              variant: null

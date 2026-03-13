@@ -1,9 +1,9 @@
-from .mutations import ReportResult, BatchResult, GenomicTest, PDL1Expression, GenomicTestResult
+from .mutations import GenomicReportResult, GenomicBatchResult
+from .expression import PDL1ReportResult, PDL1BatchResult
 
 __all__ = [
-    "ReportResult",
-    "BatchResult",
-    "GenomicTest",
-    "PDL1Expression",
-    "GenomicTestResult"
+    "GenomicReportResult",
+    "GenomicBatchResult",
+    "PDL1ReportResult",
+    "PDL1BatchResult",
 ]

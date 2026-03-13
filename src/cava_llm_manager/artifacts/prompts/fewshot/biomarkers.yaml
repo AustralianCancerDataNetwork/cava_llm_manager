@@ -1,0 +1,71 @@
+name: pdl1_expression_extraction
+version: v1
+
+description: >
+  Few-shot examples for extracting PD-L1 expression results from oncology
+  pathology reports.
+
+examples:
+
+  - input: |
+      PD-L1 tumour proportion score 60%.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests:
+            - expression: high
+              percent: 60
+
+
+  - input: |
+      PD-L1 TPS 20%.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests:
+            - expression: low
+              percent: 20
+
+
+  - input: |
+      PD-L1 expression 0%.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests:
+            - expression: negative
+              percent: 0
+
+
+  - input: |
+      PD-L1 negative.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests:
+            - expression: negative
+              percent: null
+
+
+  - input: |
+      PD-L1: unsatisfactory sample.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests:
+            - expression: unknown
+              percent: null
+
+
+  - input: |
+      Molecular testing showed EGFR mutation. No PD-L1 testing performed.
+
+    output:
+      reports:
+        - report_id: 1
+          pdl1_tests: []

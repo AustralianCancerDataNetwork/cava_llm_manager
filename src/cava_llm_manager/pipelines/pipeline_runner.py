@@ -1,7 +1,7 @@
 import asyncio
 import httpx
 import logging
-from ..utils.prompt_utils import build_prompt, schema_to_prompt
+from ..utils.prompt_utils import build_prompt, schema_to_prompt, get_root_collection_name
 from ..models.registry import get_model, get_system_prompt, get_prompt
 from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
@@ -74,12 +74,15 @@ async def run_pipeline_batch(pipeline, reports, client):
             + schema_to_prompt(pipeline.return_schema)
         )
 
-    prompt = build_prompt(reports, fewshot)
+    prompt = build_prompt(reports, pipeline.return_schema, fewshot)
 
     payload = {
         "model": model.server_label,
         "format": "json",
-        "stream": False,
+        "stream": False,    
+        "options": {
+            "temperature": 0
+        },
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -97,7 +100,7 @@ async def run_pipeline_batch(pipeline, reports, client):
         data = r.json()
 
         raw = extract_ollama_message(data)
-
+        root = get_root_collection_name(pipeline.return_schema)
         try:
             parsed = extract_json(raw)
 
@@ -108,9 +111,9 @@ async def run_pipeline_batch(pipeline, reports, client):
                 raw[:300],
             )
             raise
-        for i in parsed["reports"]:
+        for i in parsed[root]:
             idx = i["report_id"] - 1
-            i["report"] = reports[idx]
+            i[root] = reports[idx]
 
         result = pipeline.return_schema.model_validate(parsed)
         logger.debug(
