@@ -1,6 +1,6 @@
 from typing import Dict
 from .metadata import ModelMetadata
-from ..bootstrap import ensure_initialized, requires_init
+from ..bootstrap import requires_init
 import logging
 
 logger = logging.getLogger(__name__)

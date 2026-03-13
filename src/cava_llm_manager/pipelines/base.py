@@ -1,9 +1,5 @@
 from dataclasses import dataclass
-from typing import Type, Optional
-from pathlib import Path
-
-from cava_llm_manager.models.registry import get_model
-from cava_llm_manager.schemas.genomic.mutations import BatchResult
+from typing import Type
 from pydantic import BaseModel
 
 @dataclass

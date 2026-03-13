@@ -2,7 +2,6 @@ from pathlib import Path
 import logging
 from functools import wraps
 import threading
-from .models.loader import load_models, load_prompts, load_system_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +24,11 @@ def ensure_initialized():
 
         logger.info("Initializing cava_llm_manager artifacts")
 
+        from .models.loader import (
+            load_models,
+            load_prompts,
+            load_system_prompts,
+        )
         load_models(ARTIFACTS_DIR / "models")
         load_prompts(ARTIFACTS_DIR / "prompts" / "fewshot")
         load_system_prompts(ARTIFACTS_DIR / "prompts" / "system")

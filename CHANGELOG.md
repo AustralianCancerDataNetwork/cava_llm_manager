@@ -7,3 +7,6 @@
 
 ## 0.1.3 
 - lazy bootstrap
+
+## 0.1.4
+- bugfix
