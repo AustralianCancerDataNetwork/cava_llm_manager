@@ -4,8 +4,12 @@ from pathlib import Path
 from importlib import import_module
 from pydantic import BaseModel
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def load_yaml_artifact(path: Path):
+    logger.debug("Loading YAML artifact: %s", path)
     return yaml.safe_load(path.read_text())
 
 def load_fewshot_examples(path: Path):
@@ -32,6 +36,7 @@ def build_prompt(reports: List[str], fewshot: List[Dict] | None = None):
 
 def load_system_prompt(name: str):
 
+    logger.debug("Loading system prompt module: %s", name)
     module = import_module(
         f"cava_llm_manager.artifacts.prompts.system.{name}"
     )
