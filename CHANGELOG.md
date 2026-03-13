@@ -4,3 +4,6 @@
 
 ## 0.1.2
 - module logging
+
+## 0.1.3 
+- lazy bootstrap

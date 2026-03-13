@@ -33,6 +33,7 @@ def load_models(model_dir: Path) -> None:
     logger.info("Loaded %d models into registry", len(MODEL_REGISTRY))
 
 def load_prompts(prompt_dir: Path) -> None:
+    PROMPT_REGISTRY.clear()
     logger.info("Loading prompts from %s", prompt_dir)
     for file in prompt_dir.glob("*.yaml"):
         logger.debug("Loading prompt: %s", file.stem)
@@ -41,6 +42,7 @@ def load_prompts(prompt_dir: Path) -> None:
     logger.info("Loaded %d prompts", len(PROMPT_REGISTRY))
 
 def load_system_prompts(system_prompt_dir: Path) -> None:
+    SYSTEM_PROMPT_REGISTRY.clear()
     logger.info("Loading system prompts from %s", system_prompt_dir)
     for file in system_prompt_dir.glob("*.py"):
         logger.debug("Loading system prompt: %s", file.stem)
