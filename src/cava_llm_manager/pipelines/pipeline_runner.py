@@ -1,7 +1,6 @@
 import asyncio
 import httpx
 import logging
-from ..utils.prompt_utils import build_prompt, schema_to_prompt, get_root_collection_name
 from ..models.registry import get_model, get_system_prompt, get_prompt
 from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
@@ -51,38 +50,25 @@ async def retry_async(fn, retries=3):
                 str(e),
             )
             await asyncio.sleep(1)
+async def run_pipeline_batch(pipeline, items, client):
 
-async def run_pipeline_batch(pipeline, reports, client):
+    model = pipeline.model
 
-    model = get_model(pipeline.model_id)
     logger.debug(
         "Running pipeline batch | pipeline=%s | model=%s | batch_size=%d",
         pipeline.name,
         model.id,
-        len(reports),
+        len(items),
     )
-    fewshot = None
-    if pipeline.fewshot_id:
-        fewshot = get_prompt(pipeline.fewshot_id)["examples"]
 
-    system_prompt = get_system_prompt(pipeline.system_prompt)
-
-    if pipeline.inject_schema and pipeline.return_schema:
-        system_prompt = (
-            system_prompt
-            + "\n\n"
-            + schema_to_prompt(pipeline.return_schema)
-        )
-
-    prompt = build_prompt(reports, pipeline.return_schema, fewshot)
+    system_prompt = pipeline.system_prompt_text
+    prompt = pipeline.build_prompt(items)
 
     payload = {
         "model": model.server_label,
         "format": "json",
-        "stream": False,    
-        "options": {
-            "temperature": 0
-        },
+        "stream": False,
+        "options": {"temperature": 0},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -90,38 +76,40 @@ async def run_pipeline_batch(pipeline, reports, client):
     }
 
     async def call():
+
         logger.debug(
-            "Sending request to Ollama | model=%s | reports=%d",
+            "Sending request to Ollama | model=%s | batch_size=%d",
             model.server_label,
-            len(reports),
+            len(items),
         )
+
         r = await client.post(OLLAMA_URL, json=payload, timeout=600)
 
         data = r.json()
 
         raw = extract_ollama_message(data)
-        root = get_root_collection_name(pipeline.return_schema)
+
         try:
             parsed = extract_json(raw)
 
         except Exception:
             logger.error(
-                "Failed to extract JSON from model output | model=%s | output_preview=%s",
+                "Failed to extract JSON from model output | model=%s | preview=%s",
                 model.server_label,
                 raw[:300],
             )
             raise
-        for i in parsed[root]:
-            idx = i["report_id"] - 1
-            i[root] = reports[idx]
 
         result = pipeline.return_schema.model_validate(parsed)
+
         logger.debug(
-            "Batch completed successfully | model=%s | reports=%d",
+            "Batch completed successfully | model=%s | batch_size=%d",
             model.server_label,
-            len(reports),
+            len(items),
         )
+
         return result
+
     return await retry_async(call)
 
 async def run_batch_query(client, payload, retries=4):
@@ -161,23 +149,26 @@ async def process_batches(all_reports, batch_size=5, workers=4):
     
 async def run_pipeline(
     pipeline,
-    reports,
+    items,
     batch_size=5,
     workers=4
 ):
 
     logger.info(
-        "Starting pipeline | pipeline=%s | reports=%d | batch_size=%d | workers=%d",
+        "Starting pipeline | pipeline=%s | items=%d | batch_size=%d | workers=%d",
         pipeline.name,
-        len(reports),
+        len(items),
         batch_size,
         workers,
     )
+
     batches = [
-        reports[i:i+batch_size]
-        for i in range(0, len(reports), batch_size)
+        items[i:i + batch_size]
+        for i in range(0, len(items), batch_size)
     ]
+
     logger.debug("Created %d batches", len(batches))
+
     sem = asyncio.Semaphore(workers)
 
     async with httpx.AsyncClient() as client:
@@ -199,6 +190,7 @@ async def run_pipeline(
                 )
 
         tasks = [task(i, b) for i, b in enumerate(batches)]
+
         results = await asyncio.gather(*tasks)
 
     logger.info(

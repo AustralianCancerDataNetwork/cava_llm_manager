@@ -18,3 +18,6 @@
 
 ## 0.1.7
 - split out pdl1
+
+# 0.1.8
+- changed prompt handling to make introspectable

@@ -1,12 +1,22 @@
 import yaml # type: ignore
 from pathlib import Path
 import logging
-
+from importlib import import_module
 from .registry import register_model, MODEL_REGISTRY, PROMPT_REGISTRY, SYSTEM_PROMPT_REGISTRY
 from .metadata import ModelMetadata
-from ..utils.prompt_utils import load_system_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def load_system_prompt(name: str) -> str:
+
+    logger.debug("Loading system prompt module: %s", name)
+    module = import_module(
+        f"cava_llm_manager.artifacts.prompts.system.{name}"
+    )
+
+    return module.SYSTEM_PROMPT
+
 
 def load_models(model_dir: Path) -> None:
     logger.info("Loading model metadata from %s", model_dir)
