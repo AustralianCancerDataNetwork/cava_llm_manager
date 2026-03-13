@@ -21,3 +21,6 @@
 
 # 0.1.8
 - changed prompt handling to make introspectable
+
+# 0.1.9
+- proper batched prompt e.gs
