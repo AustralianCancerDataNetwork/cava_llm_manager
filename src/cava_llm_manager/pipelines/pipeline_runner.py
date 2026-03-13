@@ -1,10 +1,9 @@
 import asyncio
 import httpx
 import logging
-from cava_llm_manager.utils.prompt_utils import build_prompt, schema_to_prompt
-from cava_llm_manager.models.registry import get_model
-from cava_llm_manager import PROMPT_REGISTRY, SYSTEM_PROMPT_REGISTRY
-from cava_llm_manager.utils.json_utils import extract_json
+from ..utils.prompt_utils import build_prompt, schema_to_prompt
+from ..models.registry import get_model, get_system_prompt, get_prompt
+from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
 
 logger = logging.getLogger(__name__)
@@ -64,9 +63,9 @@ async def run_pipeline_batch(pipeline, reports, client):
     )
     fewshot = None
     if pipeline.fewshot_id:
-        fewshot = PROMPT_REGISTRY[pipeline.fewshot_id]["examples"]
+        fewshot = get_prompt(pipeline.fewshot_id)["examples"]
 
-    system_prompt = SYSTEM_PROMPT_REGISTRY[pipeline.system_prompt]
+    system_prompt = get_system_prompt(pipeline.system_prompt)
 
     if pipeline.inject_schema and pipeline.return_schema:
         system_prompt = (

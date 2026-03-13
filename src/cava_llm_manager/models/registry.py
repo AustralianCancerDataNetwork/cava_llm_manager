@@ -1,5 +1,5 @@
 from typing import Dict
-from .metadata import ModelMetadata
+from .metadata import ModelMetadata, RegistryView
 from ..bootstrap import requires_init
 import logging
 
@@ -33,3 +33,11 @@ def get_prompt(prompt_id: str):
 @requires_init
 def get_system_prompt(system_prompt_id: str):
     return SYSTEM_PROMPT_REGISTRY[system_prompt_id]
+
+@requires_init
+def get_registry() -> RegistryView:
+    return RegistryView(
+        _models=MODEL_REGISTRY,
+        _prompts=PROMPT_REGISTRY,
+        _system_prompts=SYSTEM_PROMPT_REGISTRY,
+    )

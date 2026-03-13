@@ -1,6 +1,32 @@
 from pydantic import BaseModel, HttpUrl, Field, field_validator
 from datetime import date
+from dataclasses import dataclass
+from typing import Dict
 
+@dataclass(frozen=True)
+class RegistryView:
+    _models: Dict[str, "ModelMetadata"]
+    _prompts: Dict[str, dict]
+    _system_prompts: Dict[str, str]
+
+    @property
+    def models(self) -> list[str]:
+        return sorted(self._models)
+
+    @property
+    def prompts(self) -> list[str]:
+        return sorted(self._prompts)
+
+    @property
+    def system_prompts(self) -> list[str]:
+        return sorted(self._system_prompts)
+
+    @property
+    def model_metadata(self) -> list["ModelMetadata"]:
+        return list(self._models.values())
+
+    def set_model_host_label(self, model_id: str, label: str) -> None:
+        self._models[model_id].host_label = label
 
 class ModelMetadata(BaseModel):
     name: str
@@ -50,3 +76,4 @@ class ModelMetadata(BaseModel):
         if v:
             return v.lower()
         return v
+    
