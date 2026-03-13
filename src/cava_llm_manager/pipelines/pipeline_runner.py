@@ -60,7 +60,7 @@ async def run_pipeline_batch(pipeline, reports, client):
     prompt = build_prompt(reports, fewshot)
 
     payload = {
-        "model": model.name,
+        "model": model.server_label,
         "format": "json",
         "stream": False,
         "messages": [

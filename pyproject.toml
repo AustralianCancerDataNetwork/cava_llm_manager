@@ -1,6 +1,6 @@
 [project]
 name = "cava_llm_manager"
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
@@ -16,3 +16,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+cava_llm_manager = ["**/*.yaml", "**/*.yml"]

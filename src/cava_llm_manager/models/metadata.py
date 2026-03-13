@@ -21,6 +21,12 @@ class ModelMetadata(BaseModel):
     parameter_count: int | None
     family: str | None
 
+    host_label: str | None = None
+
+    @property
+    def server_label(self) -> str:
+        return self.host_label or self.id
+
     @property
     def id(self) -> str:
         parts = [
