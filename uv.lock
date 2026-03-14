@@ -44,7 +44,7 @@ wheels = [
 
 [[package]]
 name = "cava-llm-manager"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

@@ -19,11 +19,14 @@
 ## 0.1.7
 - split out pdl1
 
-# 0.1.8
+## 0.1.8
 - changed prompt handling to make introspectable
 
-# 0.1.9
+## 0.1.9
 - proper batched prompt e.gs
 
-# 0.1.10
+## 0.1.10
 - fixed pipeline typing
+
+## 0.1.11
+- soft-match enumerator type for near matches
