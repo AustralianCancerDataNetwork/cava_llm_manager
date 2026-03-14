@@ -54,7 +54,7 @@ class GenomicTest(BaseModel):
         return value
 
 class GenomicReportResult(BaseModel):
-    report_id: int
+    report_id: int = Field(description="Unique identifier for the clinical report", default=0)
     tests: List[GenomicTest] = Field(default_factory=list, description="Genomic mutation test results mentioned in the report")
 
 class GenomicBatchResult(BaseModel):

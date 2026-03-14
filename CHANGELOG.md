@@ -30,3 +30,6 @@
 
 ## 0.1.11
 - soft-match enumerator type for near matches
+
+## 0.1.12
+- default for report id
