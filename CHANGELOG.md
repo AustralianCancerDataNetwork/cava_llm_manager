@@ -24,3 +24,6 @@
 
 # 0.1.9
 - proper batched prompt e.gs
+
+# 0.1.10
+- fixed pipeline typing

@@ -1,9 +1,15 @@
 import asyncio
 import httpx
 import logging
+from pydantic import BaseModel
 from ..models.registry import get_model, get_system_prompt, get_prompt
 from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
+from .base import PipelineSpec
+
+from typing import Any, TypeAlias
+
+JSONDict: TypeAlias = dict[str, Any]
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +56,18 @@ async def retry_async(fn, retries=3):
                 str(e),
             )
             await asyncio.sleep(1)
-async def run_pipeline_batch(pipeline, items, client):
 
-    model = pipeline.model
+async def run_pipeline_batch(
+    pipeline: PipelineSpec,
+    items: list[str],
+    client: httpx.AsyncClient,
+    *,
+    validate_output: bool,
+    attempts: int,
+    raise_on_failure: bool
+) -> BaseModel | JSONDict | None:
+    
+    model = get_model(pipeline.model_id)
 
     logger.debug(
         "Running pipeline batch | pipeline=%s | model=%s | batch_size=%d",
@@ -75,7 +90,7 @@ async def run_pipeline_batch(pipeline, items, client):
         ],
     }
 
-    async def call():
+    async def call() -> BaseModel | JSONDict:
 
         logger.debug(
             "Sending request to Ollama | model=%s | batch_size=%d",
@@ -91,68 +106,50 @@ async def run_pipeline_batch(pipeline, items, client):
 
         try:
             parsed = extract_json(raw)
-
         except Exception:
             logger.error(
                 "Failed to extract JSON from model output | model=%s | preview=%s",
                 model.server_label,
                 raw[:300],
             )
-            raise
+            raise ValueError("Failed to extract JSON from model output")
 
-        result = pipeline.return_schema.model_validate(parsed)
+        if not validate_output:
+            return parsed
 
-        logger.debug(
-            "Batch completed successfully | model=%s | batch_size=%d",
-            model.server_label,
+        if pipeline.return_schema is None:
+            raise ValueError(
+                f"Pipeline '{pipeline.name}' has no return_schema"
+            )
+
+        return pipeline.return_schema.model_validate(parsed)
+
+
+    try:
+        return await retry_async(call, retries=attempts)
+
+    except Exception:
+
+        logger.exception(
+            "Batch failed | pipeline=%s | batch_size=%d",
+            pipeline.name,
             len(items),
         )
 
-        return result
+        if raise_on_failure:
+            raise
 
-    return await retry_async(call)
-
-async def run_batch_query(client, payload, retries=4):
-
-    for attempt in range(retries):
-
-        try:
-            r = await client.post(OLLAMA_URL, json=payload["data"], timeout=600)
-
-            return r.json()
-
-        except Exception:
-
-            if attempt == retries - 1:
-                raise
-
-
-async def process_batches(all_reports, batch_size=5, workers=4):
-
-    batches = [
-        all_reports[i:i + batch_size]
-        for i in range(0, len(all_reports), batch_size)
-    ]
-
-    sem = asyncio.Semaphore(workers)
-
-    async with httpx.AsyncClient() as client:
-
-        async def task(batch):
-
-            async with sem:
-                return await run_batch_query(client, batch)
-
-        tasks = [task(b) for b in batches]
-
-        return await asyncio.gather(*tasks)
+        return None
     
 async def run_pipeline(
-    pipeline,
-    items,
+    pipeline: PipelineSpec,
+    items: list[str],
     batch_size=5,
-    workers=4
-):
+    workers=4,
+    validate_output: bool = True,
+    raise_on_failure: bool = True,
+    attempts=3
+) -> list[BaseModel | None | JSONDict]:
 
     logger.info(
         "Starting pipeline | pipeline=%s | items=%d | batch_size=%d | workers=%d",
@@ -186,8 +183,11 @@ async def run_pipeline(
                 return await run_pipeline_batch(
                     pipeline,
                     batch,
-                    client
-                )
+                    client,
+                    validate_output=validate_output,
+                    attempts=attempts,
+                    raise_on_failure=raise_on_failure
+                )   
 
         tasks = [task(i, b) for i, b in enumerate(batches)]
 
