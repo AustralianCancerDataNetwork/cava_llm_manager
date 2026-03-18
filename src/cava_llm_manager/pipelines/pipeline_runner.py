@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import logging
 from pydantic import BaseModel
-from ..models.registry import get_model, get_system_prompt, get_prompt
+from ..models.registry import get_model
 from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
 from .base import PipelineSpec
@@ -12,6 +12,80 @@ from typing import Any, TypeAlias
 JSONDict: TypeAlias = dict[str, Any]
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_report_id(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+
+    try:
+        report_id = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    return report_id if report_id > 0 else None
+
+
+def _merge_batch_metadata(
+    parsed: JSONDict | list[Any],
+    items: list[str],
+    root_name: str,
+) -> JSONDict:
+    if isinstance(parsed, dict):
+        data = dict(parsed)
+    elif isinstance(parsed, list):
+        data = {root_name: parsed}
+    else:
+        data = {}
+
+    reports = data.get(root_name, [])
+
+    if isinstance(reports, dict):
+        reports = [reports]
+    elif not isinstance(reports, list):
+        reports = []
+
+    aligned_reports: list[JSONDict | None] = [None] * len(items)
+    next_open_slot = 0
+
+    for raw_report in reports:
+        report = raw_report if isinstance(raw_report, dict) else {}
+        report_id = _coerce_report_id(report.get("report_id"))
+        target_index: int | None = None
+
+        if report_id is not None:
+            candidate_index = report_id - 1
+            if (
+                0 <= candidate_index < len(aligned_reports)
+                and aligned_reports[candidate_index] is None
+            ):
+                target_index = candidate_index
+
+        while (
+            target_index is None
+            and next_open_slot < len(aligned_reports)
+            and aligned_reports[next_open_slot] is not None
+        ):
+            next_open_slot += 1
+
+        if target_index is None:
+            if next_open_slot >= len(aligned_reports):
+                break
+            target_index = next_open_slot
+
+        merged_report = dict(report)
+        merged_report["report_id"] = target_index + 1
+        merged_report["input_text"] = items[target_index]
+        aligned_reports[target_index] = merged_report
+
+    data[root_name] = [
+        report
+        if report is not None
+        else {"report_id": i + 1, "input_text": item}
+        for i, (report, item) in enumerate(zip(aligned_reports, items))
+    ]
+
+    return data
 
 def extract_ollama_message(data: dict) -> str:
 
@@ -113,6 +187,13 @@ async def run_pipeline_batch(
                 raw[:300],
             )
             raise ValueError("Failed to extract JSON from model output")
+
+        if pipeline.return_schema is not None:
+            parsed = _merge_batch_metadata(
+                parsed,
+                items,
+                pipeline.root_collection_name,
+            )
 
         if not validate_output:
             return parsed

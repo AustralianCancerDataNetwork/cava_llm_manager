@@ -1,6 +1,6 @@
-from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from typing import Any, List, Optional
+from ..base import LLMOutputModel, LLMReportModel
 from ..soft_enum import SoftEnum
 
 # class GenomicTestResult(str, Enum):
@@ -39,7 +39,7 @@ class GenomicTestResult(SoftEnum):
             "inconclusive": "equivocal",
         }
 
-class GenomicTest(BaseModel):
+class GenomicTest(LLMOutputModel):
     genomic_marker: str = Field(description="Name of the genomic marker tested (e.g. EGFR, KRAS, BRAF, ALK)", default="")
     test_result: GenomicTestResult = Field(description="Outcome of the genomic test", default=GenomicTestResult.unknown)
     variant: Optional[str] = Field(default=None, description="Specific variant if mentioned (e.g. V600E, exon 19 deletion)")
@@ -53,9 +53,18 @@ class GenomicTest(BaseModel):
             info.data.setdefault("enum_errors", []).append(error)
         return value
 
-class GenomicReportResult(BaseModel):
-    report_id: int = Field(description="Unique identifier for the clinical report", default=0)
+class GenomicReportResult(LLMReportModel):
     tests: List[GenomicTest] = Field(default_factory=list, description="Genomic mutation test results mentioned in the report")
 
-class GenomicBatchResult(BaseModel):
+    @field_validator("tests", mode="before")
+    @classmethod
+    def coerce_tests(cls, value: Any) -> list[Any]:
+        return cls.coerce_list(value)
+
+class GenomicBatchResult(LLMOutputModel):
     reports: List[GenomicReportResult] = Field(default_factory=list)
+
+    @field_validator("reports", mode="before")
+    @classmethod
+    def coerce_reports(cls, value: Any) -> list[Any]:
+        return cls.coerce_list(value)
