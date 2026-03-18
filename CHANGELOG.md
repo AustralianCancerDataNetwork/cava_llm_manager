@@ -33,3 +33,6 @@
 
 ## 0.1.12
 - default for report id
+
+## 0.1.13
+- updated wrapper for low-spec model return safety
