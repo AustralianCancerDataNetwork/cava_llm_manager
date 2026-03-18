@@ -5,16 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
+ollama_host = "http://cava_ollama:11434"
+OLLAMA = f"{ollama_host}/api/chat"
+os.environ["OLLAMA_URL"] = OLLAMA
+
 from cava_llm_manager import get_model, get_registry
 from cava_llm_manager.logging import configure_logging
 from cava_llm_manager.pipelines.base import PipelineSpec
 from cava_llm_manager.pipelines.pipeline_runner import run_pipeline
 from cava_llm_manager.schemas.genomic import GenomicBatchResult
-
-
-ollama_host = "http://cava_ollama:11434"
-OLLAMA = f"{ollama_host}/api/chat"
-os.environ["OLLAMA_URL"] = OLLAMA
 
 configure_logging("WARNING")
 

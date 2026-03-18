@@ -36,3 +36,6 @@
 
 ## 0.1.13
 - updated wrapper for low-spec model return safety
+
+## 0.1.14
+- within-batch fault tolerance for empty string

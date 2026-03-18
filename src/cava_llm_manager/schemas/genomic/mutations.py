@@ -45,6 +45,13 @@ class GenomicTest(LLMOutputModel):
     variant: Optional[str] = Field(default=None, description="Specific variant if mentioned (e.g. V600E, exon 19 deletion)")
     enum_errors: List[str] = Field(default_factory=list)
 
+    @field_validator("genomic_marker", mode="before")
+    @classmethod
+    def coerce_genomic_marker(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
     @field_validator("test_result", mode="before")
     @classmethod
     def parse_enum(cls, v: Any, info):

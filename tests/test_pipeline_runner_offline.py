@@ -128,3 +128,35 @@ def test_run_pipeline_batch_returns_none_when_invalid_json_is_suppressed():
     )
 
     assert result is None
+
+
+def test_genomic_batch_result_accepts_null_genomic_marker_without_failing_batch():
+    result = GenomicBatchResult.model_validate(
+        {
+            "reports": [
+                {
+                    "report_id": 1,
+                    "input_text": "Mixed genomic findings.",
+                    "tests": [
+                        {
+                            "genomic_marker": None,
+                            "test_result": "positive",
+                            "variant": "V600E",
+                        },
+                        {
+                            "genomic_marker": "KRAS",
+                            "test_result": "not detected",
+                            "variant": None,
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert len(result.reports) == 1
+    assert len(result.reports[0].tests) == 2
+    assert result.reports[0].tests[0].genomic_marker == ""
+    assert result.reports[0].tests[0].test_result.value == "positive"
+    assert result.reports[0].tests[1].genomic_marker == "KRAS"
+    assert result.reports[0].tests[1].test_result.value == "negative"
