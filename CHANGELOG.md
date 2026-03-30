@@ -49,3 +49,6 @@
 - exponential backoff for batch size with failed response
 - failed batch with no raise on error now returns empty not None
 - llm.cpp backend available
+
+## 0.1.17
+- fixing artifact yaml

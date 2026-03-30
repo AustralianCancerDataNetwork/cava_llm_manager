@@ -12,7 +12,7 @@ description: >
   multimodal open model family from Google, supporting text and image input
   with text output.
 
-bibtex:
+bibtex: |
   @article{gemma_2025,
     title={Gemma 3},
     url={https://goo.gle/Gemma3Report},

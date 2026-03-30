@@ -13,7 +13,7 @@ context_window: 32768
 description: >
   INT4 AutoRound quantised version of Qwen3.5-9B optimised for efficient
   inference using symmetric quantisation with group size 128.
-bibtex: 
+bibtex: |
   @misc{qwen3.5,
       title  = {{Qwen3.5}: Towards Native Multimodal Agents},
       author = {{ Qwen Team }},
