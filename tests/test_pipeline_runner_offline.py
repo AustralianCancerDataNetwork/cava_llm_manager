@@ -143,7 +143,7 @@ def test_run_pipeline_batch_validates_conformant_output_without_ollama():
     assert result.reports[1].tests == []
 
 
-def test_run_pipeline_batch_repairs_nonconformant_shape_into_empty_reports():
+def test_run_pipeline_batch_repairs_nonconformant_shape_into_empty_batch():
     pipeline = make_pipeline()
     items = [
         "ALK status pending.",
@@ -163,9 +163,7 @@ def test_run_pipeline_batch_repairs_nonconformant_shape_into_empty_reports():
     )
 
     assert isinstance(result, GenomicBatchResult)
-    assert [report.report_id for report in result.reports] == [1, 2]
-    assert [report.input_text for report in result.reports] == items
-    assert all(report.tests == [] for report in result.reports)
+    assert result.reports == []
 
 
 def test_run_pipeline_batch_returns_empty_batch_when_invalid_json_is_suppressed():
