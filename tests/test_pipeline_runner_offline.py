@@ -143,7 +143,32 @@ def test_run_pipeline_batch_validates_conformant_output_without_ollama():
     assert result.reports[1].tests == []
 
 
-def test_run_pipeline_batch_repairs_nonconformant_shape_into_empty_batch():
+def test_run_pipeline_batch_raises_when_expected_root_is_missing():
+    pipeline = make_pipeline()
+    items = [
+        "ALK status pending.",
+        "KRAS G12C mutation detected.",
+    ]
+    client = FakeClient('{"unexpected_root": "value"}')
+
+    try:
+        asyncio.run(
+            run_pipeline_batch(
+                pipeline,
+                items,
+                client,
+                validate_output=True,
+                attempts=1,
+                raise_on_failure=True,
+            )
+        )
+    except ValueError as exc:
+        assert "expected root key 'reports'" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing reports root")
+
+
+def test_run_pipeline_batch_returns_empty_batch_when_expected_root_is_missing_and_suppressed():
     pipeline = make_pipeline()
     items = [
         "ALK status pending.",
@@ -158,12 +183,60 @@ def test_run_pipeline_batch_repairs_nonconformant_shape_into_empty_batch():
             client,
             validate_output=True,
             attempts=1,
-            raise_on_failure=True,
+            raise_on_failure=False,
         )
     )
 
     assert isinstance(result, GenomicBatchResult)
     assert result.reports == []
+
+
+def test_run_pipeline_batch_returns_empty_batch_when_expected_root_is_missing_and_validation_is_disabled():
+    pipeline = make_pipeline()
+    items = [
+        "ALK status pending.",
+        "KRAS G12C mutation detected.",
+    ]
+    client = FakeClient('{"unexpected_root": "value"}')
+
+    result = asyncio.run(
+        run_pipeline_batch(
+            pipeline,
+            items,
+            client,
+            validate_output=False,
+            attempts=1,
+            raise_on_failure=False,
+        )
+    )
+
+    assert isinstance(result, GenomicBatchResult)
+    assert result.reports == []
+
+
+def test_run_pipeline_batch_raises_when_expected_root_is_missing_and_validation_is_disabled():
+    pipeline = make_pipeline()
+    items = [
+        "ALK status pending.",
+        "KRAS G12C mutation detected.",
+    ]
+    client = FakeClient('{"unexpected_root": "value"}')
+
+    try:
+        asyncio.run(
+            run_pipeline_batch(
+                pipeline,
+                items,
+                client,
+                validate_output=False,
+                attempts=1,
+                raise_on_failure=True,
+            )
+        )
+    except ValueError as exc:
+        assert "expected root key 'reports'" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing reports root")
 
 
 def test_run_pipeline_batch_returns_empty_batch_when_invalid_json_is_suppressed():
@@ -466,7 +539,17 @@ def test_run_pipeline_retries_failed_batches_at_smaller_sizes():
         calls.append(list(batch))
         if len(batch) > 1:
             raise RuntimeError("batch too large")
-        return {"items": list(batch)}
+        return GenomicBatchResult.model_validate(
+            {
+                "reports": [
+                    {
+                        "report_id": 1,
+                        "input_text": batch[0],
+                        "tests": [],
+                    }
+                ]
+            }
+        )
 
     with patch.object(pipeline_runner_module.httpx, "AsyncClient", DummyAsyncClient):
         with patch.object(
@@ -485,12 +568,10 @@ def test_run_pipeline_retries_failed_batches_at_smaller_sizes():
             )
 
     assert calls == [["a", "b", "c", "d"], ["a", "b"], ["a"], ["b"], ["c", "d"], ["c"], ["d"]]
-    assert result == [
-        {"items": ["a"]},
-        {"items": ["b"]},
-        {"items": ["c"]},
-        {"items": ["d"]},
-    ]
+    assert len(result) == 1
+    assert isinstance(result[0], GenomicBatchResult)
+    assert [report.report_id for report in result[0].reports] == [1, 2, 3, 4]
+    assert [report.input_text for report in result[0].reports] == ["a", "b", "c", "d"]
 
 
 def test_run_pipeline_raises_once_single_item_batch_still_fails():

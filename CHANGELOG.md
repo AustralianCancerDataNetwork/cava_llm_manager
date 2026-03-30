@@ -52,3 +52,6 @@
 
 ## 0.1.17
 - fixing artifact yaml
+
+## 0.1.18
+- backoff strategy fix (batch failure)

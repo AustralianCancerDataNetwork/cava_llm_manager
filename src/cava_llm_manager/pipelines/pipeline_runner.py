@@ -53,17 +53,27 @@ def _merge_batch_metadata(
     # a bare top-level list.
     if isinstance(parsed, dict):
         data = dict(parsed)
+        if root_name not in data:
+            raise ValueError(
+                f"Parsed model output did not contain expected root key '{root_name}'"
+            )
     elif isinstance(parsed, list):
         data = {root_name: parsed}
     else:
-        data = {}
+        raise ValueError(
+            "Parsed model output must be a JSON object or top-level list"
+        )
 
-    reports = data.get(root_name, [])
+    reports = data[root_name]
 
-    if isinstance(reports, dict):
+    if reports is None:
+        reports = []
+    elif isinstance(reports, dict):
         reports = [reports]
     elif not isinstance(reports, list):
-        reports = []
+        raise ValueError(
+            f"Parsed model output field '{root_name}' must be a list, object, or null"
+        )
 
     # Stage results in original input order. Missing slots stay as `None`,
     # and are dropped later rather than being synthesized into empty reports.
@@ -796,7 +806,187 @@ async def _run_batch_with_backoff(
             )
             results.extend(child_results)
 
-        return results
+        if pipeline.return_schema is None:
+            return results
+
+        return [
+            _reassemble_backoff_results(
+                pipeline,
+                results,
+                validate_output=validate_output,
+            )
+        ]
+
+
+def _extract_collection_dicts(
+    pipeline: PipelineSpec,
+    batch_result: BaseModel | JSONDict | None,
+) -> list[JSONDict]:
+    if batch_result is None:
+        return []
+
+    root_name = pipeline.root_collection_name
+
+    if isinstance(batch_result, BaseModel):
+        collection = getattr(batch_result, root_name, [])
+        return [
+            item.model_dump(mode="json")
+            if isinstance(item, BaseModel)
+            else dict(item)
+            for item in collection
+        ]
+
+    if isinstance(batch_result, dict):
+        collection = batch_result.get(root_name, [])
+        if isinstance(collection, dict):
+            collection = [collection]
+        if not isinstance(collection, list):
+            return []
+        return [dict(item) if isinstance(item, dict) else {} for item in collection]
+
+    return []
+
+
+def _renumber_collection_items(items: list[JSONDict]) -> list[JSONDict]:
+    renumbered: list[JSONDict] = []
+
+    for i, item in enumerate(items, start=1):
+        merged = dict(item)
+        merged["report_id"] = i
+        renumbered.append(merged)
+
+    return renumbered
+
+
+def _combine_batch_results(
+    pipeline: PipelineSpec,
+    results: list[BaseModel | JSONDict | None],
+    *,
+    validate_output: bool,
+) -> BaseModel | JSONDict:
+    combined_items: list[JSONDict] = []
+
+    for result in results:
+        combined_items.extend(_extract_collection_dicts(pipeline, result))
+
+    merged = {
+        pipeline.root_collection_name: _renumber_collection_items(combined_items)
+    }
+
+    if validate_output:
+        return pipeline.return_schema.model_validate(merged)
+
+    return merged
+
+
+def _renumber_review_payload(
+    review: JSONDict | None,
+    report_id: int,
+) -> JSONDict | None:
+    if review is None:
+        return None
+
+    updated = dict(review)
+    updated["report_id"] = report_id
+    return updated
+
+
+def _combine_confidence_results(
+    pipeline: PipelineSpec,
+    results: list[ConfidenceBatchResult],
+    *,
+    validate_output: bool,
+) -> ConfidenceBatchResult:
+    combined_result = _combine_batch_results(
+        pipeline,
+        [result.result for result in results],
+        validate_output=validate_output,
+    )
+    combined_original_result = _combine_batch_results(
+        pipeline,
+        [result.original_result for result in results],
+        validate_output=validate_output,
+    )
+
+    traces: list[ReportConfidenceTrace] = []
+    next_report_id = 1
+
+    for result in results:
+        for trace in result.report_confidence:
+            original_report = dict(trace.original_report)
+            original_report["report_id"] = next_report_id
+
+            final_report = dict(trace.final_report)
+            final_report["report_id"] = next_report_id
+
+            traces.append(
+                ReportConfidenceTrace(
+                    report_id=next_report_id,
+                    input_text=trace.input_text,
+                    original_report=original_report,
+                    final_report=final_report,
+                    initial_review=_renumber_review_payload(
+                        trace.initial_review,
+                        next_report_id,
+                    ),
+                    revision_review=_renumber_review_payload(
+                        trace.revision_review,
+                        next_report_id,
+                    ),
+                    revised=trace.revised,
+                    unresolved=trace.unresolved,
+                    revision_error=trace.revision_error,
+                    review_error=trace.review_error,
+                )
+            )
+            next_report_id += 1
+
+    summary = ConfidenceBatchSummary(
+        reviewed_reports=sum(result.summary.reviewed_reports for result in results),
+        accepted_reports=sum(result.summary.accepted_reports for result in results),
+        revised_reports=sum(result.summary.revised_reports for result in results),
+        unresolved_reports=sum(result.summary.unresolved_reports for result in results),
+        review_failures=sum(result.summary.review_failures for result in results),
+    )
+
+    return ConfidenceBatchResult(
+        result=combined_result,
+        original_result=combined_original_result,
+        report_confidence=traces,
+        summary=summary,
+    )
+
+
+def _reassemble_backoff_results(
+    pipeline: PipelineSpec,
+    results: list[BaseModel | JSONDict | ConfidenceBatchResult | None],
+    *,
+    validate_output: bool,
+) -> BaseModel | JSONDict | ConfidenceBatchResult:
+    confidence_results = [
+        result for result in results if isinstance(result, ConfidenceBatchResult)
+    ]
+
+    if confidence_results:
+        if len(confidence_results) != len(results):
+            raise ValueError(
+                "Backoff reassembly received a mixed set of confidence and non-confidence results"
+            )
+        return _combine_confidence_results(
+            pipeline,
+            confidence_results,
+            validate_output=validate_output,
+        )
+
+    return _combine_batch_results(
+        pipeline,
+        [
+            result
+            for result in results
+            if not isinstance(result, ConfidenceBatchResult)
+        ],
+        validate_output=validate_output,
+    )
 
 
 async def run_pipeline(
