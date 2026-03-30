@@ -1,0 +1,27 @@
+name: qwen3.5-27b-opus-reasoning-distilled
+version: "1"
+
+provider: jackrong
+architecture: qwen
+
+family: qwen3.5
+parameter_count: 27_000_000_000
+quantization: Q4_K_M
+
+context_window: 262144
+
+description: >
+  Reasoning-distilled variant of Qwen3.5-27B, fine-tuned to replicate the structured
+  reasoning style of Claude 4.6 Opus via supervised distillation of chain-of-thought
+  trajectories. This model emphasises step-by-step problem solving, planning, and
+  agentic execution, with native support for thinking-mode reasoning and improved
+  stability in tool-calling and coding workflows.
+
+  The GGUF Q4_K_M variant provides an efficient balance between performance and
+  memory usage (~16–18GB VRAM), enabling strong reasoning capability comparable to
+  larger models while remaining suitable for local inference on mid-range hardware.
+
+link: https://huggingface.co/Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF
+
+date_added: 2026-03-28
+sha256: 050c89b0ff28bd17f60a204bb4b4035fda04717dcdb9271ebb71dad0e822fc82

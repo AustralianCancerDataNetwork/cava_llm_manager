@@ -1,17 +1,32 @@
 import asyncio
+import json
 import httpx
 import logging
 from pydantic import BaseModel
+
 from ..models.registry import get_model
-from ..utils.json_utils import extract_json
 from ..utils.config import OLLAMA_URL
-from .base import PipelineSpec
+from ..utils.json_utils import extract_json
+from .base import (
+    ConfidenceBatchResult,
+    ConfidenceBatchSummary,
+    PipelineSpec,
+    ReportConfidenceTrace,
+)
 
 from typing import Any, TypeAlias
 
 JSONDict: TypeAlias = dict[str, Any]
 
 logger = logging.getLogger(__name__)
+
+LLAMA_CPP_PROMPT_TEMPLATE = (
+    "<|system|>\n"
+    "{system_prompt}\n\n"
+    "<|user|>\n"
+    "{user_prompt}\n\n"
+    "<|assistant|>\n"
+)
 
 
 def _coerce_report_id(value: Any) -> int | None:
@@ -95,6 +110,7 @@ def _merge_batch_metadata(
 
     return data
 
+
 def extract_ollama_message(data: dict) -> str:
     # Ollama chat responses wrap the generated text under
     # `message.content`; raise early if that envelope is missing.
@@ -118,6 +134,98 @@ def extract_ollama_message(data: dict) -> str:
 
     return msg["content"]
 
+
+def extract_llama_cpp_message(data: dict) -> str:
+    if "error" in data:
+        logger.error("llama.cpp returned error: %s", data["error"])
+        raise RuntimeError(f"llama.cpp error: {data['error']}")
+
+    if isinstance(data.get("content"), str):
+        return data["content"]
+
+    if isinstance(data.get("response"), str):
+        return data["response"]
+
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict) and isinstance(first.get("text"), str):
+            return first["text"]
+
+    logger.error("Unexpected llama.cpp response: %s", data)
+    raise RuntimeError(f"Unexpected llama.cpp response structure:\n{data}")
+
+
+def _build_ollama_payload(
+    model_label: str,
+    system_prompt: str,
+    user_prompt: str,
+    host_options: JSONDict | None = None,
+) -> JSONDict:
+    options = {"temperature": 0}
+    if host_options:
+        options.update(host_options)
+
+    return {
+        "model": model_label,
+        "format": "json",
+        "stream": False,
+        "options": options,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+
+
+def _build_llama_cpp_prompt(
+    pipeline: PipelineSpec,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    template = pipeline.prompt_template or LLAMA_CPP_PROMPT_TEMPLATE
+    return template.format(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+
+
+def _build_llama_cpp_payload(
+    pipeline: PipelineSpec,
+    system_prompt: str,
+    user_prompt: str,
+) -> JSONDict:
+    payload: JSONDict = {
+        "prompt": _build_llama_cpp_prompt(
+            pipeline,
+            system_prompt,
+            user_prompt,
+        ),
+        "stream": False,
+        "temperature": 0,
+        "cache_prompt": True,
+        "n_predict": 2048,
+    }
+    payload.update(pipeline.host_options)
+    return payload
+
+
+def _resolve_pipeline_url(pipeline: PipelineSpec) -> str:
+    if pipeline.host_type == "ollama":
+        return pipeline.host_url or OLLAMA_URL
+
+    if pipeline.host_type == "llama_cpp":
+        if not pipeline.host_url:
+            raise ValueError(
+                f"Pipeline '{pipeline.name}' requires host_url for llama_cpp"
+            )
+        return pipeline.host_url
+
+    raise ValueError(
+        f"Unsupported host_type '{pipeline.host_type}' for pipeline '{pipeline.name}'"
+    )
+
+
 async def retry_async(fn, retries=3):
     # Keep transient API or parsing failures from failing the entire batch.
     for attempt in range(retries):
@@ -139,6 +247,409 @@ async def retry_async(fn, retries=3):
             )
             await asyncio.sleep(1)
 
+
+async def _call_model_json(
+    pipeline: PipelineSpec,
+    system_prompt: str,
+    user_prompt: str,
+    client: httpx.AsyncClient,
+    *,
+    attempts: int,
+) -> JSONDict | list[Any]:
+    model = get_model(pipeline.model_id)
+    url = _resolve_pipeline_url(pipeline)
+
+    if pipeline.host_type == "ollama":
+        payload = _build_ollama_payload(
+            model.server_label,
+            system_prompt,
+            user_prompt,
+            pipeline.host_options,
+        )
+        response_extractor = extract_ollama_message
+    elif pipeline.host_type == "llama_cpp":
+        payload = _build_llama_cpp_payload(
+            pipeline,
+            system_prompt,
+            user_prompt,
+        )
+        response_extractor = extract_llama_cpp_message
+    else:
+        raise ValueError(
+            f"Unsupported host_type '{pipeline.host_type}' for pipeline '{pipeline.name}'"
+        )
+
+    async def call() -> JSONDict | list[Any]:
+        response = await client.post(url, json=payload, timeout=600)
+        data = response.json()
+        raw = response_extractor(data)
+
+        try:
+            return extract_json(raw)
+        except Exception:
+            logger.error(
+                "Failed to extract JSON from model output | model=%s | host_type=%s | preview=%s",
+                model.server_label,
+                pipeline.host_type,
+                raw[:300],
+            )
+            raise ValueError("Failed to extract JSON from model output")
+
+    return await retry_async(call, retries=attempts)
+
+
+def _validate_pipeline_output(
+    pipeline: PipelineSpec,
+    parsed: JSONDict | list[Any],
+    items: list[str],
+) -> BaseModel:
+    if pipeline.return_schema is None:
+        raise ValueError(
+            f"Pipeline '{pipeline.name}' has no return_schema"
+        )
+
+    merged = _merge_batch_metadata(
+        parsed,
+        items,
+        pipeline.root_collection_name,
+    )
+
+    return pipeline.return_schema.model_validate(merged)
+
+
+def _build_empty_pipeline_result(
+    pipeline: PipelineSpec,
+) -> BaseModel | JSONDict | ConfidenceBatchResult:
+    if pipeline.return_schema is None:
+        return {}
+
+    empty_batch = pipeline.return_schema.model_validate(
+        {pipeline.root_collection_name: []}
+    )
+
+    if (
+        pipeline.confidence is not None
+        and pipeline.confidence.enabled
+        and pipeline.confidence.return_sidecar
+    ):
+        return ConfidenceBatchResult(
+            result=empty_batch,
+            original_result=empty_batch,
+        )
+
+    return empty_batch
+
+
+def _build_confidence_review_item(
+    input_text: str,
+    report_data: JSONDict,
+) -> str:
+    return (
+        "SOURCE INPUT\n"
+        f"{input_text}\n\n"
+        "EXTRACTED STRUCTURED OUTPUT\n"
+        f"{json.dumps(report_data, indent=2)}\n\n"
+        "Assess whether the structured output is faithful to the source input. "
+        "Return only JSON matching the configured review schema."
+    )
+
+
+def _build_confidence_revision_item(
+    pipeline: PipelineSpec,
+    input_text: str,
+    report_data: JSONDict,
+    issues: list[str],
+    rationale: str | None,
+) -> str:
+    sections = [
+        "SOURCE INPUT",
+        input_text,
+        "",
+        "CURRENT STRUCTURED OUTPUT",
+        json.dumps(report_data, indent=2),
+        "",
+        "TARGET REPORT JSON SCHEMA",
+        pipeline.serialized_report_schema,
+        "",
+        "REVIEW ISSUES",
+        json.dumps(issues, indent=2),
+    ]
+
+    if rationale:
+        sections.extend(["", "REVIEW RATIONALE", rationale])
+
+    sections.extend(
+        [
+            "",
+            "Produce a corrected JSON object for this single report only. "
+            "Return only JSON.",
+        ]
+    )
+
+    return "\n".join(sections)
+
+
+def _extract_collection_items(
+    model: BaseModel,
+    root_name: str,
+) -> list[BaseModel]:
+    return list(getattr(model, root_name, []))
+
+
+async def _run_review_pass(
+    review_pipeline: PipelineSpec,
+    input_text: str,
+    report_data: JSONDict,
+    client: httpx.AsyncClient,
+    *,
+    attempts: int,
+) -> BaseModel | None:
+    if review_pipeline.return_schema is None:
+        raise ValueError(
+            "Confidence review requires review_pipeline.return_schema"
+        )
+
+    review_item = _build_confidence_review_item(input_text, report_data)
+    review_prompt = review_pipeline.build_prompt([review_item])
+    parsed = await _call_model_json(
+        review_pipeline,
+        review_pipeline.system_prompt_text,
+        review_prompt,
+        client,
+        attempts=attempts,
+    )
+
+    validated = _validate_pipeline_output(
+        review_pipeline,
+        parsed,
+        [input_text],
+    )
+    reviews = _extract_collection_items(
+        validated,
+        review_pipeline.root_collection_name,
+    )
+    return reviews[0] if reviews else None
+
+
+def _validate_single_report_output(
+    pipeline: PipelineSpec,
+    input_text: str,
+    report_data: JSONDict,
+) -> BaseModel:
+    wrapped = {
+        pipeline.root_collection_name: [dict(report_data)],
+    }
+    validated = _validate_pipeline_output(
+        pipeline,
+        wrapped,
+        [input_text],
+    )
+    reports = _extract_collection_items(validated, pipeline.root_collection_name)
+
+    if not reports:
+        raise ValueError("Validated revised output did not contain a report")
+
+    return reports[0]
+
+
+async def _run_revision_pass(
+    pipeline: PipelineSpec,
+    revision_pipeline: PipelineSpec,
+    input_text: str,
+    report_data: JSONDict,
+    issues: list[str],
+    rationale: str | None,
+    client: httpx.AsyncClient,
+    *,
+    attempts: int,
+) -> BaseModel:
+    revision_item = _build_confidence_revision_item(
+        pipeline,
+        input_text,
+        report_data,
+        issues,
+        rationale,
+    )
+    revision_prompt = (
+        revision_pipeline.build_prompt([revision_item])
+        if revision_pipeline.return_schema is not None
+        else revision_item
+    )
+    parsed = await _call_model_json(
+        revision_pipeline,
+        revision_pipeline.system_prompt_text,
+        revision_prompt,
+        client,
+        attempts=attempts,
+    )
+    if isinstance(parsed, dict) and pipeline.root_collection_name not in parsed:
+        parsed = {pipeline.root_collection_name: [parsed]}
+
+    validated = _validate_pipeline_output(
+        pipeline,
+        parsed,
+        [input_text],
+    )
+    reports = _extract_collection_items(validated, pipeline.root_collection_name)
+
+    if not reports:
+        raise ValueError("Validated revised output did not contain a report")
+
+    return reports[0]
+
+
+async def _apply_confidence_loop(
+    pipeline: PipelineSpec,
+    batch_result: BaseModel,
+    client: httpx.AsyncClient,
+    *,
+    attempts: int,
+    raise_on_failure: bool,
+) -> ConfidenceBatchResult:
+    confidence = pipeline.confidence
+    if confidence is None or not confidence.enabled:
+        return ConfidenceBatchResult(
+            result=batch_result,
+            original_result=batch_result,
+        )
+
+    if confidence.review_pipeline is None:
+        raise ValueError(
+            f"Pipeline '{pipeline.name}' has confidence enabled but no review_pipeline"
+        )
+
+    root_name = pipeline.root_collection_name
+    original_reports = _extract_collection_items(batch_result, root_name)
+    final_reports: list[JSONDict] = []
+    traces: list[ReportConfidenceTrace] = []
+    summary = ConfidenceBatchSummary()
+
+    for report in original_reports:
+        summary.reviewed_reports += 1
+
+        report_dict = report.model_dump(mode="json")
+        final_report_dict = dict(report_dict)
+        trace = ReportConfidenceTrace(
+            report_id=report.report_id,
+            input_text=report.input_text,
+            original_report=report_dict,
+            final_report=final_report_dict,
+        )
+
+        try:
+            initial_review = await _run_review_pass(
+                confidence.review_pipeline,
+                report.input_text,
+                report_dict,
+                client,
+                attempts=attempts,
+            )
+
+            if initial_review is None:
+                raise ValueError("Confidence review returned no result")
+
+            trace.initial_review = initial_review.model_dump(mode="json")
+            decision = getattr(initial_review, "decision").value
+            issues = list(getattr(initial_review, "issues", []))
+            rationale = getattr(initial_review, "rationale", None)
+
+            if decision == "accept":
+                summary.accepted_reports += 1
+
+            elif (
+                decision == "revise"
+                and confidence.acceptance_policy == "revise_once_then_annotate"
+                and confidence.attempt_revision
+                and confidence.max_revision_rounds > 0
+            ):
+                revised_report: BaseModel | None = None
+
+                try:
+                    if (
+                        getattr(initial_review, "corrected_output", None)
+                        and isinstance(initial_review.corrected_output, dict)
+                    ):
+                        revised_report = _validate_single_report_output(
+                            pipeline,
+                            report.input_text,
+                            initial_review.corrected_output,
+                        )
+                    elif confidence.revision_pipeline is not None:
+                        revised_report = await _run_revision_pass(
+                            pipeline,
+                            confidence.revision_pipeline,
+                            report.input_text,
+                            report_dict,
+                            issues,
+                            rationale,
+                            client,
+                            attempts=attempts,
+                        )
+                    else:
+                        trace.revision_error = (
+                            "Revision requested but no revision_pipeline or corrected_output was provided"
+                        )
+                except Exception as exc:
+                    trace.revision_error = str(exc)
+
+                if revised_report is not None:
+                    final_report_dict = revised_report.model_dump(mode="json")
+                    trace.final_report = final_report_dict
+                    trace.revised = True
+                    summary.revised_reports += 1
+
+                    try:
+                        revision_review = await _run_review_pass(
+                            confidence.review_pipeline,
+                            report.input_text,
+                            final_report_dict,
+                            client,
+                            attempts=attempts,
+                        )
+                    except Exception as exc:
+                        trace.revision_error = str(exc)
+                        revision_review = None
+
+                    if revision_review is not None:
+                        trace.revision_review = revision_review.model_dump(mode="json")
+                        revision_decision = getattr(revision_review, "decision").value
+                        if revision_decision == "accept":
+                            summary.accepted_reports += 1
+                        else:
+                            trace.unresolved = True
+                    else:
+                        trace.unresolved = True
+                else:
+                    trace.unresolved = True
+
+            else:
+                trace.unresolved = True
+
+        except Exception as exc:
+            trace.review_error = str(exc)
+            trace.unresolved = True
+            summary.review_failures += 1
+            if raise_on_failure:
+                raise
+
+        if trace.unresolved:
+            summary.unresolved_reports += 1
+
+        final_reports.append(final_report_dict)
+        traces.append(trace)
+
+    final_batch_data = batch_result.model_dump(mode="json")
+    final_batch_data[root_name] = final_reports
+    final_result = pipeline.return_schema.model_validate(final_batch_data)
+
+    return ConfidenceBatchResult(
+        result=final_result,
+        original_result=batch_result,
+        report_confidence=traces,
+        summary=summary,
+    )
+
+
 async def run_pipeline_batch(
     pipeline: PipelineSpec,
     items: list[str],
@@ -147,7 +658,7 @@ async def run_pipeline_batch(
     validate_output: bool,
     attempts: int,
     raise_on_failure: bool
-) -> BaseModel | JSONDict | None:
+) -> BaseModel | JSONDict | ConfidenceBatchResult | None:
 
     model = get_model(pipeline.model_id)
 
@@ -158,69 +669,74 @@ async def run_pipeline_batch(
         len(items),
     )
 
+    if (
+        pipeline.confidence is not None
+        and pipeline.confidence.enabled
+        and not validate_output
+    ):
+        raise ValueError(
+            "Confidence loop requires validate_output=True"
+        )
+
     system_prompt = pipeline.system_prompt_text
     prompt = pipeline.build_prompt(items)
 
-    # The runner targets Ollama's chat API directly and requests a
-    # non-streaming JSON response for the whole batch.
-    payload = {
-        "model": model.server_label,
-        "format": "json",
-        "stream": False,
-        "options": {"temperature": 0},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-    }
-
-    async def call() -> BaseModel | JSONDict:
+    async def call() -> BaseModel | JSONDict | ConfidenceBatchResult:
         # Send the batch prompt, extract the raw model text, then parse and
         # validate it into the configured return schema.
         logger.debug(
-            "Sending request to Ollama | model=%s | batch_size=%d",
+            "Sending request | host_type=%s | model=%s | batch_size=%d",
+            pipeline.host_type,
             model.server_label,
             len(items),
         )
 
-        r = await client.post(OLLAMA_URL, json=payload, timeout=600)
+        parsed = await _call_model_json(
+            pipeline,
+            system_prompt,
+            prompt,
+            client,
+            attempts=attempts,
+        )
 
-        data = r.json()
+        if pipeline.return_schema is None:
+            if validate_output:
+                raise ValueError(
+                    f"Pipeline '{pipeline.name}' has no return_schema"
+                )
+            return parsed
 
-        raw = extract_ollama_message(data)
-
-        try:
-            parsed = extract_json(raw)
-        except Exception:
-            logger.error(
-                "Failed to extract JSON from model output | model=%s | preview=%s",
-                model.server_label,
-                raw[:300],
-            )
-            raise ValueError("Failed to extract JSON from model output")
-
-        if pipeline.return_schema is not None:
-            # Realign report outputs to the original batch inputs and add
-            # traceability metadata before schema validation.
-            parsed = _merge_batch_metadata(
+        if not validate_output:
+            return _merge_batch_metadata(
                 parsed,
                 items,
                 pipeline.root_collection_name,
             )
 
-        if not validate_output:
-            return parsed
+        validated = _validate_pipeline_output(
+            pipeline,
+            parsed,
+            items,
+        )
 
-        if pipeline.return_schema is None:
-            raise ValueError(
-                f"Pipeline '{pipeline.name}' has no return_schema"
-            )
+        if pipeline.confidence is None or not pipeline.confidence.enabled:
+            return validated
 
-        return pipeline.return_schema.model_validate(parsed)
+        reviewed = await _apply_confidence_loop(
+            pipeline,
+            validated,
+            client,
+            attempts=attempts,
+            raise_on_failure=raise_on_failure,
+        )
 
+        if pipeline.confidence.return_sidecar:
+            return reviewed
+
+        return reviewed.result
 
     try:
-        return await retry_async(call, retries=attempts)
+        return await call()
 
     except Exception:
 
@@ -233,8 +749,56 @@ async def run_pipeline_batch(
         if raise_on_failure:
             raise
 
-        return None
-    
+        return _build_empty_pipeline_result(pipeline)
+
+
+async def _run_batch_with_backoff(
+    pipeline: PipelineSpec,
+    batch: list[str],
+    client: httpx.AsyncClient,
+    *,
+    validate_output: bool,
+    attempts: int,
+    raise_on_failure: bool,
+) -> list[BaseModel | JSONDict | ConfidenceBatchResult | None]:
+    try:
+        result = await run_pipeline_batch(
+            pipeline,
+            batch,
+            client,
+            validate_output=validate_output,
+            attempts=attempts,
+            raise_on_failure=raise_on_failure,
+        )
+        return [result]
+    except Exception:
+        if not raise_on_failure or len(batch) <= 1:
+            raise
+
+        next_batch_size = max(1, len(batch) // 2)
+        logger.warning(
+            "Batch failed; retrying with smaller chunks | pipeline=%s | original_size=%d | next_batch_size=%d",
+            pipeline.name,
+            len(batch),
+            next_batch_size,
+        )
+
+        results: list[BaseModel | JSONDict | ConfidenceBatchResult | None] = []
+        for i in range(0, len(batch), next_batch_size):
+            child_batch = batch[i:i + next_batch_size]
+            child_results = await _run_batch_with_backoff(
+                pipeline,
+                child_batch,
+                client,
+                validate_output=validate_output,
+                attempts=attempts,
+                raise_on_failure=raise_on_failure,
+            )
+            results.extend(child_results)
+
+        return results
+
+
 async def run_pipeline(
     pipeline: PipelineSpec,
     items: list[str],
@@ -243,7 +807,7 @@ async def run_pipeline(
     validate_output: bool = True,
     raise_on_failure: bool = True,
     attempts=3
-) -> list[BaseModel | None | JSONDict]:
+) -> list[BaseModel | None | JSONDict | ConfidenceBatchResult]:
     # Split the workload into batches and run them concurrently, while
     # preserving result order via `asyncio.gather`.
     logger.info(
@@ -275,18 +839,23 @@ async def run_pipeline(
                     len(batch),
                 )
 
-                return await run_pipeline_batch(
+                return await _run_batch_with_backoff(
                     pipeline,
                     batch,
                     client,
                     validate_output=validate_output,
                     attempts=attempts,
                     raise_on_failure=raise_on_failure
-                )   
+                )
 
         tasks = [task(i, b) for i, b in enumerate(batches)]
 
-        results = await asyncio.gather(*tasks)
+        nested_results = await asyncio.gather(*tasks)
+        results = [
+            result
+            for batch_results in nested_results
+            for result in batch_results
+        ]
 
     logger.info(
         "Pipeline completed | pipeline=%s | batches=%d",

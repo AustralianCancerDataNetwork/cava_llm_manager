@@ -13,14 +13,16 @@ context_window: 32768
 description: >
   INT4 AutoRound quantised version of Qwen3.5-9B optimised for efficient
   inference using symmetric quantisation with group size 128.
-  bibtex citation: 
-  @article{cheng2023optimize,
-  title={Optimize weight rounding via signed gradient descent for the quantization of llms},
-  author={Cheng, Wenhua and Zhang, Weiwei and Shen, Haihao and Cai, Yiyang and He, Xin and Lv, Kaokao and Liu, Yi},
-  journal={arXiv preprint arXiv:2309.05516},
-  year={2023}}
+bibtex: 
+  @misc{qwen3.5,
+      title  = {{Qwen3.5}: Towards Native Multimodal Agents},
+      author = {{ Qwen Team }},
+      month  = {February},
+      year   = {2026},
+      url    = {https://qwen.ai/blog?id=qwen3.5}
+  }
 
-link: https://huggingface.co/Qwen/Qwen3.5-9B
+link: https://huggingface.co/unsloth/Qwen3.5-9B-GGUF
 
-date_added: null
+date_added: 2026-03-30
 sha256: null

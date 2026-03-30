@@ -44,3 +44,8 @@
 - updated base class to explicitly handle extra return fields
 - moved coersion functions to the base class
 - put inject_schema back into the prompt build step
+
+## 0.1.16
+- exponential backoff for batch size with failed response
+- failed batch with no raise on error now returns empty not None
+- llm.cpp backend available

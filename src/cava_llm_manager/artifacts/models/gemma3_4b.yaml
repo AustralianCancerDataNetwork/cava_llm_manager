@@ -11,7 +11,8 @@ description: >
   GGUF quantized instruct variant of Gemma 3 4B. Gemma 3 is a lightweight
   multimodal open model family from Google, supporting text and image input
   with text output.
-  bibtex
+
+bibtex:
   @article{gemma_2025,
     title={Gemma 3},
     url={https://goo.gle/Gemma3Report},

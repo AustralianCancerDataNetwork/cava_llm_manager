@@ -1,10 +1,53 @@
-from dataclasses import dataclass
-from typing import Type, Any
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Type, Any, Literal, get_args, get_origin
 from pydantic import BaseModel
 import json
 from ..models.registry import get_model, get_system_prompt, get_prompt
 from ..schemas.base import LLMOutputModel
 
+
+@dataclass
+class ConfidenceConfig:
+    enabled: bool = False
+    review_pipeline: PipelineSpec | None = None
+    revision_pipeline: PipelineSpec | None = None
+    attempt_revision: bool = False
+    max_revision_rounds: int = 1
+    acceptance_policy: str = "revise_once_then_annotate"
+    return_sidecar: bool = True
+
+
+@dataclass
+class ConfidenceBatchSummary:
+    reviewed_reports: int = 0
+    accepted_reports: int = 0
+    revised_reports: int = 0
+    unresolved_reports: int = 0
+    review_failures: int = 0
+
+
+@dataclass
+class ReportConfidenceTrace:
+    report_id: int
+    input_text: str
+    original_report: dict[str, Any]
+    final_report: dict[str, Any]
+    initial_review: dict[str, Any] | None = None
+    revision_review: dict[str, Any] | None = None
+    revised: bool = False
+    unresolved: bool = False
+    revision_error: str | None = None
+    review_error: str | None = None
+
+
+@dataclass
+class ConfidenceBatchResult:
+    result: BaseModel | dict[str, Any] | None
+    original_result: BaseModel | dict[str, Any] | None
+    report_confidence: list[ReportConfidenceTrace] = field(default_factory=list)
+    summary: ConfidenceBatchSummary = field(default_factory=ConfidenceBatchSummary)
 
 
 @dataclass
@@ -15,6 +58,11 @@ class PipelineSpec:
     fewshot_id: str | None = None
     return_schema: Type[BaseModel] | None = None
     inject_schema: bool = False
+    host_type: Literal["ollama", "llama_cpp"] = "ollama"
+    host_url: str | None = None
+    host_options: dict[str, Any] = field(default_factory=dict)
+    prompt_template: str | None = None
+    confidence: ConfidenceConfig | None = None
 
     @property
     def model(self):
@@ -56,6 +104,27 @@ class PipelineSpec:
         return root.capitalize()
 
     @property
+    def report_model(self) -> Type[BaseModel]:
+        if self.return_schema is None:
+            raise ValueError(
+                f"Pipeline '{self.name}' has no return_schema"
+            )
+
+        field_info = self.return_schema.model_fields[self.root_collection_name]
+        annotation = field_info.annotation
+        origin = get_origin(annotation)
+
+        if origin is list:
+            args = get_args(annotation)
+            if args and isinstance(args[0], type) and issubclass(args[0], BaseModel):
+                return args[0]
+
+        raise ValueError(
+            f"{self.return_schema.__name__}.{self.root_collection_name} "
+            "must be typed as list[BaseModel]"
+        )
+
+    @property
     def serialized_return_schema(self) -> str:
         if self.return_schema is None:
             raise ValueError(
@@ -64,6 +133,13 @@ class PipelineSpec:
 
         return json.dumps(
             self.return_schema.model_json_schema(),
+            indent=2,
+        )
+
+    @property
+    def serialized_report_schema(self) -> str:
+        return json.dumps(
+            self.report_model.model_json_schema(),
             indent=2,
         )
 
@@ -143,6 +219,11 @@ class PipelineSpec:
                 self.return_schema.__name__ if self.return_schema else None
             ),
             "inject_schema": self.inject_schema,
+            "host_type": self.host_type,
+            "host_url": self.host_url,
+            "confidence_enabled": (
+                self.confidence.enabled if self.confidence else False
+            ),
             "root_collection_name": (
                 self.root_collection_name if self.return_schema else None
             ),

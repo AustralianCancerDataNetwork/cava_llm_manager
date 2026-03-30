@@ -1,0 +1,32 @@
+name: mixtral-8x7b-instruct
+version: "1"
+
+provider: mistral-ai
+architecture: mixtral
+
+family: mixtral
+parameter_count: 47_000_000_000
+quantization: Q4_K_M
+
+context_window: 32768
+
+description: >
+  Instruction-tuned sparse Mixture-of-Experts (MoE) language model from the Mixtral
+  suite. Built using 8 experts of ~7B parameters each with top-2 routing, resulting
+  in ~12–14B active parameters per token. This Q4_K_M GGUF variant provides a strong
+  balance between performance and memory efficiency, enabling high-quality reasoning
+  comparable to larger dense models while remaining suitable for local inference
+  with partial GPU offloading.
+
+bibtex:
+  @article{jiang2024mixtral,
+    title={Mixtral of experts},
+    author={Jiang, Albert Q and Sablayrolles, Alexandre and Roux, Antoine and Mensch, Arthur and Savary, Blanche and Bamford, Chris and Chaplot, Devendra Singh and Casas, Diego de las and Hanna, Emma Bou and Bressand, Florian and others},
+    journal={arXiv preprint arXiv:2401.04088},
+    year={2024}
+  }
+
+link: https://huggingface.co/Hadiseh-Mhd/Mixtral-8x7B-Instruct-v0.1-Q4_K_M-GGUF
+
+date_added: 2026-03-28
+sha256: 4e8c844e8a3068939eb8ec67eb816aae9405dd717b531bbbd576e4fb419bec08
