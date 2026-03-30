@@ -3,14 +3,6 @@ from typing import Any, List, Optional
 from ..base import LLMOutputModel, LLMReportModel
 from ..soft_enum import SoftEnum
 
-# class GenomicTestResult(str, Enum):
-#     positive = "positive"
-#     wildtype = "wildtype"
-#     negative = "negative"
-#     equivocal = "equivocal"
-#     result_pending = "result_pending"
-#     unknown = "unknown"
-
 
 class GenomicTestResult(SoftEnum):
     positive = "positive"
@@ -52,26 +44,8 @@ class GenomicTest(LLMOutputModel):
             return ""
         return str(value).strip()
 
-    @field_validator("test_result", mode="before")
-    @classmethod
-    def parse_enum(cls, v: Any, info):
-        value, error = GenomicTestResult.parse(v)
-        if error:
-            info.data.setdefault("enum_errors", []).append(error)
-        return value
-
 class GenomicReportResult(LLMReportModel):
     tests: List[GenomicTest] = Field(default_factory=list, description="Genomic mutation test results mentioned in the report")
 
-    @field_validator("tests", mode="before")
-    @classmethod
-    def coerce_tests(cls, value: Any) -> list[Any]:
-        return cls.coerce_list(value)
-
 class GenomicBatchResult(LLMOutputModel):
     reports: List[GenomicReportResult] = Field(default_factory=list)
-
-    @field_validator("reports", mode="before")
-    @classmethod
-    def coerce_reports(cls, value: Any) -> list[Any]:
-        return cls.coerce_list(value)

@@ -39,3 +39,8 @@
 
 ## 0.1.14
 - within-batch fault tolerance for empty string
+
+## 0.1.15
+- updated base class to explicitly handle extra return fields
+- moved coersion functions to the base class
+- put inject_schema back into the prompt build step

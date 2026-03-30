@@ -3,6 +3,7 @@ from typing import Type, Any
 from pydantic import BaseModel
 import json
 from ..models.registry import get_model, get_system_prompt, get_prompt
+from ..schemas.base import LLMOutputModel
 
 
 
@@ -31,8 +32,14 @@ class PipelineSpec:
             raise ValueError(
                 f"Pipeline '{self.name}' has no return_schema"
             )
-
-        fields = list(self.return_schema.model_fields.keys())
+        # filter out fields that have only been included on the model
+        # for LLM result tolerance and are not part of the actual output schema
+        helper_fields = set(LLMOutputModel.model_fields.keys())
+        fields = [
+            name
+            for name in self.return_schema.model_fields.keys()
+            if name not in helper_fields
+        ]
 
         if len(fields) != 1:
             raise ValueError(
@@ -49,9 +56,26 @@ class PipelineSpec:
         return root.capitalize()
 
     @property
+    def serialized_return_schema(self) -> str:
+        if self.return_schema is None:
+            raise ValueError(
+                f"Pipeline '{self.name}' has no return_schema"
+            )
+
+        return json.dumps(
+            self.return_schema.model_json_schema(),
+            indent=2,
+        )
+
+    @property
     def system_prompt_text(self) -> str:
         base = get_system_prompt(self.system_prompt_id)
         sections = [base]
+
+        if self.inject_schema:
+            sections.append("\nTarget JSON schema:\n")
+            sections.append(self.serialized_return_schema)
+            sections.append("")
 
         if self.fewshot_examples:
             sections.append("\nExamples:\n")

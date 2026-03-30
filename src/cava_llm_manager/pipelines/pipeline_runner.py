@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _coerce_report_id(value: Any) -> int | None:
+    # Treat missing, invalid, or non-positive ids as unusable so the caller
+    # can fall back to positional alignment within the batch.
     if value in (None, ""):
         return None
 
@@ -31,6 +33,9 @@ def _merge_batch_metadata(
     items: list[str],
     root_name: str,
 ) -> JSONDict:
+    # Normalise the parsed payload into a dict keyed by the batch collection
+    # name so downstream logic can work with either `{"reports": [...]}` or
+    # a bare top-level list.
     if isinstance(parsed, dict):
         data = dict(parsed)
     elif isinstance(parsed, list):
@@ -45,6 +50,8 @@ def _merge_batch_metadata(
     elif not isinstance(reports, list):
         reports = []
 
+    # Stage results in original input order. Missing slots stay as `None`,
+    # and are dropped later rather than being synthesized into empty reports.
     aligned_reports: list[JSONDict | None] = [None] * len(items)
     next_open_slot = 0
 
@@ -61,6 +68,8 @@ def _merge_batch_metadata(
             ):
                 target_index = candidate_index
 
+        # If the model omitted a usable report_id, or duplicated one, place
+        # the result into the next available batch slot instead.
         while (
             target_index is None
             and next_open_slot < len(aligned_reports)
@@ -73,22 +82,22 @@ def _merge_batch_metadata(
                 break
             target_index = next_open_slot
 
+        # Reattach the resolved report position and original input text so the
+        # validated output stays traceable back to the batch input.
         merged_report = dict(report)
         merged_report["report_id"] = target_index + 1
         merged_report["input_text"] = items[target_index]
         aligned_reports[target_index] = merged_report
 
     data[root_name] = [
-        report
-        if report is not None
-        else {"report_id": i + 1, "input_text": item}
-        for i, (report, item) in enumerate(zip(aligned_reports, items))
+        report for report in aligned_reports if report is not None
     ]
 
     return data
 
 def extract_ollama_message(data: dict) -> str:
-
+    # Ollama chat responses wrap the generated text under
+    # `message.content`; raise early if that envelope is missing.
     if "error" in data:
         logger.error("Ollama returned error: %s", data["error"])
         raise RuntimeError(f"Ollama error: {data['error']}")
@@ -110,9 +119,8 @@ def extract_ollama_message(data: dict) -> str:
     return msg["content"]
 
 async def retry_async(fn, retries=3):
-
+    # Keep transient API or parsing failures from failing the entire batch.
     for attempt in range(retries):
-
         try:
             return await fn()
 
@@ -140,7 +148,7 @@ async def run_pipeline_batch(
     attempts: int,
     raise_on_failure: bool
 ) -> BaseModel | JSONDict | None:
-    
+
     model = get_model(pipeline.model_id)
 
     logger.debug(
@@ -153,6 +161,8 @@ async def run_pipeline_batch(
     system_prompt = pipeline.system_prompt_text
     prompt = pipeline.build_prompt(items)
 
+    # The runner targets Ollama's chat API directly and requests a
+    # non-streaming JSON response for the whole batch.
     payload = {
         "model": model.server_label,
         "format": "json",
@@ -165,7 +175,8 @@ async def run_pipeline_batch(
     }
 
     async def call() -> BaseModel | JSONDict:
-
+        # Send the batch prompt, extract the raw model text, then parse and
+        # validate it into the configured return schema.
         logger.debug(
             "Sending request to Ollama | model=%s | batch_size=%d",
             model.server_label,
@@ -189,6 +200,8 @@ async def run_pipeline_batch(
             raise ValueError("Failed to extract JSON from model output")
 
         if pipeline.return_schema is not None:
+            # Realign report outputs to the original batch inputs and add
+            # traceability metadata before schema validation.
             parsed = _merge_batch_metadata(
                 parsed,
                 items,
@@ -231,7 +244,8 @@ async def run_pipeline(
     raise_on_failure: bool = True,
     attempts=3
 ) -> list[BaseModel | None | JSONDict]:
-
+    # Split the workload into batches and run them concurrently, while
+    # preserving result order via `asyncio.gather`.
     logger.info(
         "Starting pipeline | pipeline=%s | items=%d | batch_size=%d | workers=%d",
         pipeline.name,

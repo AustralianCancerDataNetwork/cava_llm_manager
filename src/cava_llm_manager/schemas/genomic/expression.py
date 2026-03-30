@@ -1,5 +1,5 @@
-from pydantic import Field, field_validator
-from typing import Any, List, Optional
+from pydantic import Field
+from typing import List, Optional
 from ..base import LLMOutputModel, LLMReportModel
 from ..soft_enum import SoftEnum
 
@@ -34,31 +34,12 @@ class PDL1Test(LLMOutputModel):
         default=None,
         description="PD-L1 tumour proportion score percentage if mentioned"
     )
-
-    @field_validator("expression", mode="before")
-    @classmethod
-    def parse_expression(cls, v, info):
-        value, error = PDL1Expression.parse(v)
-        if error:
-            info.data.setdefault("enum_errors", []).append(error)
-        return value
-
     enum_errors: List[str] = Field(default_factory=list)
 
 
 class PDL1ReportResult(LLMReportModel):
     pdl1_tests: List[PDL1Test] = Field(default_factory=list)
 
-    @field_validator("pdl1_tests", mode="before")
-    @classmethod
-    def coerce_pdl1_tests(cls, value: Any) -> list[Any]:
-        return cls.coerce_list(value)
-
 
 class PDL1BatchResult(LLMOutputModel):
     reports: List[PDL1ReportResult] = Field(default_factory=list)
-
-    @field_validator("reports", mode="before")
-    @classmethod
-    def coerce_reports(cls, value: Any) -> list[Any]:
-        return cls.coerce_list(value)

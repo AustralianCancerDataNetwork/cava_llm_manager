@@ -1,6 +1,6 @@
 [project]
 name = "cava_llm_manager"
-version = "0.1.14"
+version = "0.1.15"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
